@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { extractTokenFromHeader, authenticateToken } from '@/lib/auth';
 import { getConnectionWithRetry } from '@/lib/database';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
@@ -29,7 +31,7 @@ export async function GET(request: NextRequest) {
         'SELECT questionnaire_id FROM assessments WHERE user_id = ? AND completed_at IS NOT NULL',
         [userId]
       );
-      
+
       const completedIds = (Array.isArray(completedAssessments) ? completedAssessments : []).map((a: any) => a.questionnaire_id);
 
       let currentFound = false;
@@ -37,7 +39,7 @@ export async function GET(request: NextRequest) {
         const stringId = q.name.toLowerCase().replace(/\s+/g, '-');
 
         let status: 'completed' | 'current' | 'locked' = 'locked';
-        
+
         if (completedIds.includes(q.id)) {
           status = 'completed';
         } else if (!currentFound) {
@@ -67,7 +69,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('خطا در دریافت وضعیت ارزیابی‌ها:', error);
     if (error.name === 'JsonWebTokenError' || error.name === 'TokenExpiredError') {
-        return NextResponse.json({ success: false, message: 'توکن نامعتبر یا منقضی شده است' }, { status: 401 });
+      return NextResponse.json({ success: false, message: 'توکن نامعتبر یا منقضی شده است' }, { status: 401 });
     }
     return NextResponse.json({ success: false, message: 'خطای سرور' }, { status: 500 });
   }
