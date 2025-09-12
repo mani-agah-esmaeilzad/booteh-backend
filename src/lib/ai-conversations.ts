@@ -1,4 +1,4 @@
-// فایل کامل: mani-agah-esmaeilzad/test/src/lib/ai-conversations.ts
+// فایل کامل: src/lib/ai-conversations.ts
 
 // این کلاس دیگر جلسات را در حافظه نگه نمی‌دارد و فقط برای تبدیل فرمت تاریخچه استفاده می‌شود.
 
@@ -20,9 +20,10 @@ export class ConversationManager {
     if (!dbMessages || dbMessages.length === 0) {
       return [];
     }
-    
+
+    // نکته: message_type در دیتابیس باید 'user' یا 'model' باشد
     return dbMessages.map(msg => ({
-      role: msg.message_type === 'ai' ? 'model' : 'user',
+      role: msg.message_type === 'model' ? 'model' : 'user',
       parts: [{ text: msg.content }]
     }));
   }
