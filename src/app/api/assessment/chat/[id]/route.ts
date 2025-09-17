@@ -1,8 +1,9 @@
+// فایل کامل: src/app/api/assessment/chat/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { extractTokenFromHeader, authenticateToken } from '@/lib/auth';
 import { chatRequestSchema } from '@/lib/validation';
 import { ConversationManager } from '@/lib/ai-conversations';
-import { generateResponse } from '@/lib/ai-gemini';
+import { generateResponse } from '@/lib/ai'; // تغییر از ai-gemini به ai
 import { getConnectionWithRetry } from '@/lib/database';
 
 export async function POST(
@@ -34,9 +35,9 @@ export async function POST(
       'SELECT * FROM chat_messages WHERE assessment_id = ? ORDER BY created_at ASC',
       [assessmentId]
     );
-    const fullHistory = ConversationManager.formatHistoryForGemini(dbHistory as any[]);
+    // استفاده از تابع فرمت‌بندی جدید
+    const fullHistory = ConversationManager.formatHistoryForOpenAI(dbHistory as any[]);
 
-    // ✅ اصلاح کلیدی: خواندن اطلاعات کاربر و پرسشنامه در هر درخواست چت
     const [users] = await connection.execute('SELECT first_name, last_name, work_experience FROM users WHERE id = ?', [userId]);
     const [assessments] = await connection.execute('SELECT questionnaire_id FROM assessments WHERE id = ?', [assessmentId]);
     if (!Array.isArray(assessments) || assessments.length === 0) throw new Error('ارزیابی یافت نشد');
@@ -51,13 +52,13 @@ export async function POST(
     const userName = `${user.first_name} ${user.last_name}`.trim();
     const userJob = user.work_experience || "حوزه کاری شما";
 
-    // ✅ اصلاح کلیدی: شخصی‌سازی پرامپت شخصیت در هر بار ارسال پیام
     const systemInstruction = questionnaire.persona_prompt
       .replace(/{user_name}/g, userName)
       .replace(/{user_job}/g, userJob)
       .replace(/{min_questions}/g, questionnaire.min_questions.toString())
       .replace(/{max_questions}/g, questionnaire.max_questions.toString());
 
+    // فراخوانی تابع جدید
     let aiResponse = await generateResponse(systemInstruction, fullHistory);
     if (!aiResponse) throw new Error('پاسخ خالی از هوش مصنوعی');
 

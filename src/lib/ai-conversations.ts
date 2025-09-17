@@ -1,30 +1,26 @@
 // فایل کامل: src/lib/ai-conversations.ts
-
-// این کلاس دیگر جلسات را در حافظه نگه نمی‌دارد و فقط برای تبدیل فرمت تاریخچه استفاده می‌شود.
-
-type MessageRole = 'user' | 'model';
-
-// این اینترفیس برای هماهنگی با ai-gemini.ts استفاده می‌شود
-export interface HistoryMessage {
-  role: MessageRole;
-  parts: { text: string }[];
-}
+import { ChatMessage as GeminiChatMessage } from './ai-gemini'; // این ایمپورت ممکن است دیگر لازم نباشد
+import { ChatMessage as OpenAIChatMessage } from './ai';
 
 export class ConversationManager {
-  /**
-   * این تابع تاریخچه پیام‌های ذخیره شده در دیتابیس را به فرمت مورد نیاز Gemini تبدیل می‌کند.
-   * @param dbMessages - آرایه‌ای از پیام‌ها که از جدول chat_messages خوانده شده.
-   * @returns آرایه‌ای با فرمت مناسب برای ارسال به Gemini.
-   */
-  static formatHistoryForGemini(dbMessages: any[]): HistoryMessage[] {
-    if (!dbMessages || dbMessages.length === 0) {
-      return [];
-    }
+  // ... (توابع قبلی ممکن است هنوز در جایی استفاده شوند، پس آن‌ها را نگه می‌داریم)
 
-    // نکته: message_type در دیتابیس باید 'user' یا 'model' باشد
-    return dbMessages.map(msg => ({
-      role: msg.message_type === 'model' ? 'model' : 'user',
-      parts: [{ text: msg.content }]
-    }));
+  static formatHistoryForGemini(dbHistory: any[]): GeminiChatMessage[] {
+    return dbHistory
+      .filter(msg => msg.message_type === 'user' || msg.message_type === 'ai')
+      .map(msg => ({
+        role: msg.message_type === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.content }],
+      }));
+  }
+
+  // تابع جدید برای فرمت کردن تاریخچه برای OpenAI و AvalAI
+  static formatHistoryForOpenAI(dbHistory: any[]): OpenAIChatMessage[] {
+    return dbHistory
+      .filter(msg => msg.message_type === 'user' || msg.message_type === 'ai')
+      .map(msg => ({
+        role: msg.message_type === 'user' ? 'user' : 'assistant', // نقش 'model' به 'assistant' تغییر می‌کند
+        content: msg.content,
+      }));
   }
 }

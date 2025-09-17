@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 
-// پیکربندی دیتابیس
+// پیکربندی دیتابیس از متغیرهای محیطی خوانده می‌شود
 const dbConfig = {
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -8,15 +8,15 @@ const dbConfig = {
   database: process.env.DB_NAME,
   port: parseInt(process.env.DB_PORT || '3306'),
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 15, // افزایش محدودیت برای کارایی بهتر
   queueLimit: 0,
   charset: 'utf8mb4'
 };
 
-// ایجاد pool connection
+// ایجاد pool connection برای مدیریت بهینه اتصالات
 const pool = mysql.createPool(dbConfig);
 
-// Retry logic برای اتصال
+// تابع برای دریافت اتصال با قابلیت تلاش مجدد در صورت بروز خطا
 export async function getConnectionWithRetry(maxRetries = 3, delay = 1000) {
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -28,26 +28,33 @@ export async function getConnectionWithRetry(maxRetries = 3, delay = 1000) {
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
+  // این خط برای اطمینان از اینکه TypeScript خطا نمی‌دهد اضافه شده است
+  throw new Error('Could not get a database connection after multiple retries.');
 }
 
-// تست اتصال
+// تابع برای تست اولیه اتصال به دیتابیس
 export async function testConnection() {
+  let connection;
   try {
-    const connection = await pool.getConnection();
-    console.log('✅ اتصال به دیتابیس MySQL برقرار شد');
-    connection.release();
+    connection = await pool.getConnection();
+    console.log('✅ اتصال به دیتابیس MySQL با موفقیت برقرار شد.');
     return true;
   } catch (error) {
     console.error('❌ خطا در اتصال به دیتابیس:', error);
     return false;
+  } finally {
+    if (connection) connection.release();
   }
 }
 
-// ایجاد جداول مورد نیاز
+// تابع اصلی برای ساختاردهی و ایجاد تمام جداول مورد نیاز پروژه
 export async function createTables() {
+  let connection;
   try {
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     
+    console.log("شروع فرآیند ایجاد جداول...");
+
     // جدول کاربران
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS users (
@@ -61,24 +68,46 @@ export async function createTables() {
         age INT,
         education_level VARCHAR(100),
         work_experience VARCHAR(100),
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
     `);
+    console.log("  - جدول 'users' ایجاد شد.");
 
-    // جدول توکن‌های احراز هویت
+    // جدول ادمین‌ها
     await connection.execute(`
-      CREATE TABLE IF NOT EXISTS auth_tokens (
+        CREATE TABLE IF NOT EXISTS admins (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            username VARCHAR(50) UNIQUE NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+    console.log("  - جدول 'admins' ایجاد شد.");
+
+    // جدول پرسشنامه‌ها (سناریوهای ارزیابی)
+    await connection.execute(`
+      CREATE TABLE IF NOT EXISTS questionnaires (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        token VARCHAR(500) NOT NULL,
-        expires_at TIMESTAMP NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        description TEXT,
+        initial_prompt TEXT NOT NULL,
+        persona_prompt TEXT NOT NULL,
+        analysis_prompt TEXT NOT NULL,
+        has_narrator BOOLEAN DEFAULT FALSE,
+        character_count INT DEFAULT 1,
+        has_timer BOOLEAN DEFAULT TRUE,
+        timer_duration INT DEFAULT 15,
+        min_questions INT DEFAULT 5,
+        max_questions INT DEFAULT 8,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
     `);
+    console.log("  - جدول 'questionnaires' ایجاد شد.");
 
-    // جدول ارزیابی‌ها
+    // جدول ارزیابی‌های هر کاربر
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS assessments (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -86,22 +115,23 @@ export async function createTables() {
         questionnaire_id INT NOT NULL,
         score INT,
         max_score INT DEFAULT 100,
-        level VARCHAR(50),
         description TEXT,
-        analysis_result JSON,
+        supplementary_answers JSON,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         completed_at TIMESTAMP NULL,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (questionnaire_id) REFERENCES questionnaires(id) ON DELETE CASCADE
       )
     `);
+    console.log("  - جدول 'assessments' ایجاد شد.");
 
-    // جدول پیام‌های چت
+    // جدول پیام‌های چت برای هر ارزیابی
     await connection.execute(`
       CREATE TABLE IF NOT EXISTS chat_messages (
         id INT AUTO_INCREMENT PRIMARY KEY,
         assessment_id INT NOT NULL,
         user_id INT NOT NULL,
-        message_type ENUM('user', 'ai1', 'ai2', 'system') NOT NULL,
+        message_type ENUM('user', 'ai', 'system') NOT NULL,
         content TEXT NOT NULL,
         character_name VARCHAR(100),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -109,55 +139,15 @@ export async function createTables() {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
+    console.log("  - جدول 'chat_messages' ایجاد شد.");
 
-    // جدول وضعیت‌های ارزیابی
-    await connection.execute(`
-      CREATE TABLE IF NOT EXISTS assessment_states (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        session_id VARCHAR(255) UNIQUE NOT NULL,
-        state_data JSON NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    // جدول خودارزیابی مهارت‌های نرم
-    await connection.execute(`
-      CREATE TABLE IF NOT EXISTS soft_skills_self_assessment (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT NOT NULL,
-        q1 TINYINT NOT NULL,
-        q2 TINYINT NOT NULL,
-        q3 TINYINT NOT NULL,
-        q4 TINYINT NOT NULL,
-        q5 TINYINT NOT NULL,
-        q6 TINYINT NOT NULL,
-        q7 TINYINT NOT NULL,
-        q8 TINYINT NOT NULL,
-        q9 TINYINT NOT NULL,
-        q10 TINYINT NOT NULL,
-        q11 TINYINT NOT NULL,
-        q12 TINYINT NOT NULL,
-        q13 TINYINT NOT NULL,
-        q14 TINYINT NOT NULL,
-        q15 TINYINT NOT NULL,
-        q16 TINYINT NOT NULL,
-        q17 TINYINT NOT NULL,
-        q18 TINYINT NOT NULL,
-        q19 TINYINT NOT NULL,
-        q20 TINYINT NOT NULL,
-        q21 TINYINT NOT NULL,
-        q22 TINYINT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    `);
-
-    console.log('✅ جداول دیتابیس با موفقیت ایجاد شدند');
-    connection.release();
+    console.log('✅ فرآیند ایجاد جداول با موفقیت به پایان رسید.');
     return true;
   } catch (error) {
-    console.error('❌ خطا در ایجاد جداول:', error);
+    console.error('❌ خطا در هنگام ایجاد جداول:', error);
     return false;
+  } finally {
+    if (connection) connection.release();
   }
 }
 
